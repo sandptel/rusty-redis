@@ -3,6 +3,7 @@ use std::error::Error;
 use tokio::net::TcpListener;
 use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 use bytes::BytesMut;
+use std::collections::HashMap;
 // use resp_async::ValueDecoder;
 use resp::{ Decoder, Value };
 use std::io::BufReader;
@@ -18,6 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // let mut decoder = ValueDecoder::default();
             // let mut buf = BytesMut::with_capacity(512);
             let mut read_buf = [0u8; 512];
+            let mut database: HashMap<String, String> = HashMap::new();
 
             loop {
                 match socket.read(&mut read_buf).await {
@@ -29,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut decoder = Decoder::new(BufReader::new(read_buf.as_slice()));
                         if let Ok(command_value) = decoder.decode() {
                             let command = Command::from_value(command_value);
-                            let response = command.get_return();
+                            let response = command.get_return(&mut database);
                             let _ = socket.write_all(response.as_bytes()).await;
                         }
                     }
@@ -67,11 +69,13 @@ impl Command {
                             }
                         }
                         "SET" if arr.len() > 2 => {
-                            if let (Value::Bulk(key_bytes), Value::Bulk(val_bytes)) = (&arr[1], &arr[2]) {
-                                Command::SET(
-                                    key_bytes.clone(),
-                                    val_bytes.clone()
+                            if
+                                let (Value::Bulk(key_bytes), Value::Bulk(val_bytes)) = (
+                                    &arr[1],
+                                    &arr[2],
                                 )
+                            {
+                                Command::SET(key_bytes.clone(), val_bytes.clone())
                             } else {
                                 Command::UNKNOWN
                             }
@@ -93,12 +97,21 @@ impl Command {
         }
     }
 
-    pub fn get_return(&self) -> String {
+    pub fn get_return(&self, database: &mut HashMap<String, String>) -> String {
         match self {
             Command::PING => "+PONG\r\n".to_string(),
             Command::ECHO(msg) => format!("${}\r\n{}\r\n", msg.len(), msg),
-            Command::SET(_, _) => "+OK\r\n".to_string(),
-            Command::GET(_) => "$-1\r\n".to_string(), // Not implemented, returns nil
+            Command::SET(key, value) => {
+                database.insert(key.clone(), value.clone());
+                "+OK\r\n".to_string()
+            }
+            Command::GET(key) => {
+                if let Some(msg) = database.get(key) {
+                    format!("${}\r\n{}\r\n", msg.len(), msg)
+                } else {
+                    "$-1\r\n".to_string()
+                }
+            } // Not implemented, returns nil
             Command::UNKNOWN => "-ERR unknown command\r\n".to_string(),
         }
     }
