@@ -30,12 +30,10 @@ fn main() {
 fn handle_stream(stream: &mut TcpStream) -> Result<(), Box<dyn Error>> {
     let mut buf = [0; 512];
     loop {
-        stream.read(&mut buf)?;
         let read_count = stream.read(&mut buf)?;
         if read_count == 0 {
             break;
         }
-        println!("wrote PONG");
         stream.write(b"+PONG\r\n")?;
     }
     Ok(())
