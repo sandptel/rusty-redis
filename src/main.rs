@@ -1,40 +1,35 @@
-#![allow(unused_imports)]
-use std::net::TcpListener;
+// #![allow(unused_imports)]
+// use std::net::TcpListener;
 use std::io::Write;
 use std::io::Read;
-use std::net::TcpStream;
+// use std::net::TcpStream;
 use std::error::Error;
-fn main() {
-    println!("Logs:");
+use tokio::net::TcpListener;
+use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    println!("Listening on 127.0.0.1:6379");
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                println!("accepted new connection");
-                match handle_stream(&mut stream) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        println!("Error: {}", e);
+    loop {
+        let (mut socket, _) = listener.accept().await?;
+        tokio::spawn(async move {
+            let mut buf = [0; 512];
+            loop {
+                match socket.read(&mut buf).await {
+                    Ok(0) => {
+                        break;
+                    }
+                    Ok(_) => {
+                        let _ = socket.write_all(b"+PONG\r\n").await;
+                        println!("Pong Sent");
+                    }
+                    Err(_) => {
+                        break;
                     }
                 }
             }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
+        });
     }
-}
-
-fn handle_stream(stream: &mut TcpStream) -> Result<(), Box<dyn Error>> {
-    let mut buf = [0; 512];
-    loop {
-        let read_count = stream.read(&mut buf)?;
-        if read_count == 0 {
-            break;
-        }
-        stream.write(b"+PONG\r\n")?;
-    }
-    Ok(())
 }
