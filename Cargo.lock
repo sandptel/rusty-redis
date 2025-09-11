@@ -74,6 +74,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "resp",
+ "resp-async",
  "thiserror",
  "tokio",
 ]
@@ -105,6 +107,12 @@ dependencies = [
  "autocfg",
  "scopeguard",
 ]
+
+[[package]]
+name = "log"
+version = "0.4.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "memchr"
@@ -205,6 +213,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c82cf8cff14456045f55ec4241383baeff27af886adb72ffb2162f99911de0fd"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "resp"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d276d153c2c18b622527a9118d8055e4e26530f15d616d6290b00acc7e2f6aa"
+
+[[package]]
+name = "resp-async"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b11434d924f9a514dbdcbec6cab6e143c6bed2da8c12b5648b24c33f2491d8a7"
+dependencies = [
+ "bytes",
+ "log",
+ "tokio",
 ]
 
 [[package]]
