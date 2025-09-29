@@ -59,7 +59,7 @@ pub enum Command {
     PING,
     ECHO(String),
     SET(String, String),
-    SET_EXPIRY(String, String, String, String),
+    SetExpiry(String, String, String, String),
     GET(String),
     UNKNOWN,
 }
@@ -101,7 +101,7 @@ impl Command {
                                     Value::Bulk(timeout),
                                 ) = (&arr[1], &arr[2], &arr[3], &arr[4])
                             {
-                                Command::SET_EXPIRY(
+                                Command::SetExpiry(
                                     key_bytes.clone(),
                                     val_bytes.clone(),
                                     expiry_command.clone(),
@@ -128,20 +128,6 @@ impl Command {
         }
     }
 
-    /// Returns a future that completes when the specified expiry `Instant` is reached.
-    // pub async fn wait_until_expiry(
-    //     database: &Arc<Mutex<HashMap<String, String>>>,
-    //     expiry: Instant,
-    //     key: &String
-    // ) -> () {
-    //     sleep_until(expiry);
-    //     let mut db = database.lock().unwrap();
-    //     // db.insert(key.clone(), value.clone());
-    //     match db.remove(key) {
-    //         None => { eprintln!("The key to be removed is not found in the database: {key}") }
-    //         Some(x) => { println!("Removed the Key: {key} after expiry : {x}") }
-    //     }
-    // }
     pub async fn get_return(&self, database: &Arc<Mutex<HashMap<String, String>>>) -> String {
         match self {
             Command::PING => "+PONG\r\n".to_string(),
@@ -152,38 +138,46 @@ impl Command {
 
                 "+OK\r\n".to_string()
             }
-            Command::SET_EXPIRY(key, value, expiry_command, timeout) => {
+            Command::SetExpiry(key, value, expiry_command, timeout) => {
                 {
                     let mut db = database.lock().unwrap();
                     db.insert(key.clone(), value.clone());
                 } // MutexGuard is dropped here
 
-                let timeout: u64 = timeout.parse().unwrap();
-                let expiry_time = match expiry_command.as_str() {
-                    "PX" => { Duration::from_millis(timeout) }
-                    "EX" => { Duration::from_secs(timeout) }
-                    _ => {
-                        eprintln!("GIVE A CORRECT TIMEOUT VALUE IDENTIFIER");
-                        Duration::from_millis(DEFAULT_EXPIRY)
-                    }
-                };
-                let now = Instant::now();
-                let later = now + expiry_time;
-
-                sleep_until(later).await;
-
-                {
-                    let mut db = database.lock().unwrap();
-                    match db.remove(key) {
+                // Clone the values before moving into spawned task
+                let db_clone = Arc::clone(database);
+                let key_clone = key.clone();
+                let expiry_command_clone = expiry_command.clone();
+                let timeout_clone = timeout.clone();
+                
+                tokio::spawn(async move {
+                    let timeout: u64 = timeout_clone.parse().unwrap_or(DEFAULT_EXPIRY);
+                    let expiry_time = match expiry_command_clone.as_str() {
+                        "PX" => Duration::from_millis(timeout),
+                        "EX" => Duration::from_secs(timeout),
+                        _ => {
+                            eprintln!("GIVE A CORRECT TIMEOUT VALUE IDENTIFIER");
+                            Duration::from_millis(DEFAULT_EXPIRY)
+                        }
+                    };
+                    
+                    let now = Instant::now();
+                    let later = now + expiry_time;
+                    
+                    sleep_until(later).await;
+                    
+                    let mut db = db_clone.lock().unwrap();
+                    match db.remove(&key_clone) {
                         None => {
-                            eprintln!("The key to be removed is not found in the database: {key}");
+                            eprintln!("The key to be removed is not found in the database: {}", key_clone);
                         }
                         Some(x) => {
-                            println!("Removed the Key: {key} after expiry : {x}");
+                            println!("Removed the Key: {} after expiry: {}", key_clone, x);
                         }
                     }
-                } // MutexGuard is dropped here
+                });
 
+                // Return OK immediately
                 "+OK\r\n".to_string()
             }
             Command::GET(key) => {
