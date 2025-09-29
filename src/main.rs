@@ -153,8 +153,8 @@ impl Command {
                 tokio::spawn(async move {
                     let timeout: u64 = timeout_clone.parse().unwrap_or(DEFAULT_EXPIRY);
                     let expiry_time = match expiry_command_clone.as_str() {
-                        "PX" => Duration::from_millis(timeout),
-                        "EX" => Duration::from_secs(timeout),
+                        "px" => Duration::from_millis(timeout),
+                        "ex" => Duration::from_secs(timeout),
                         _ => {
                             eprintln!("GIVE A CORRECT TIMEOUT VALUE IDENTIFIER");
                             Duration::from_millis(DEFAULT_EXPIRY)
