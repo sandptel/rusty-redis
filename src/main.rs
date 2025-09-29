@@ -153,10 +153,12 @@ impl Command {
                 "+OK\r\n".to_string()
             }
             Command::SET_EXPIRY(key, value, expiry_command, timeout) => {
-                let mut db = database.lock().unwrap();
-                db.insert(key.clone(), value.clone());
+                {
+                    let mut db = database.lock().unwrap();
+                    db.insert(key.clone(), value.clone());
+                } // MutexGuard is dropped here
+
                 let timeout: u64 = timeout.parse().unwrap();
-                // let timeout = Duration::from;
                 let expiry_time = match expiry_command.as_str() {
                     "PX" => { Duration::from_millis(timeout) }
                     "EX" => { Duration::from_secs(timeout) }
@@ -165,20 +167,23 @@ impl Command {
                         Duration::from_millis(DEFAULT_EXPIRY)
                     }
                 };
-                let now = Instant::now(); // Get the current instant (time point)
-                let later = now + expiry_time; // Add 100 milliseconds to it
-                // Self::wait_until_expiry(database, later, key).await;
+                let now = Instant::now();
+                let later = now + expiry_time;
+
                 sleep_until(later).await;
-                let mut db = database.lock().unwrap();
-                // db.insert(key.clone(), value.clone());
-                match db.remove(key) {
-                    None => {
-                        eprintln!("The key to be removed is not found in the database: {key}");
+
+                {
+                    let mut db = database.lock().unwrap();
+                    match db.remove(key) {
+                        None => {
+                            eprintln!("The key to be removed is not found in the database: {key}");
+                        }
+                        Some(x) => {
+                            println!("Removed the Key: {key} after expiry : {x}");
+                        }
                     }
-                    Some(x) => {
-                        println!("Removed the Key: {key} after expiry : {x}");
-                    }
-                }
+                } // MutexGuard is dropped here
+
                 "+OK\r\n".to_string()
             }
             Command::GET(key) => {
