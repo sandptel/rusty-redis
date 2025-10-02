@@ -136,7 +136,7 @@ pub enum Command {
     LRANGE(String, isize, isize),
     LLEN(String),
     LPOP(String, Option<isize>),
-    BLPOP(String, isize),
+    BLPOP(String, f64),
     UNKNOWN,
 }
 
@@ -282,7 +282,7 @@ impl Command {
                                     &arr[2],
                                 )
                             {
-                                let timeout: isize = timeout.parse().unwrap_or(0);
+                                let timeout: f64 = timeout.parse().unwrap_or(0.0);
                                 Command::BLPOP(key_bytes.clone(), timeout)
                             } else {
                                 Command::UNKNOWN
@@ -477,9 +477,13 @@ impl Command {
                             if !list.is_empty() {
                                 let popped_element = list.remove(0);
                                 // Return array with key name and popped element
-                                return format!("*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n", 
-                                    key_clone.len(), key_clone, 
-                                    popped_element.len(), popped_element);
+                                return format!(
+                                    "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                                    key_clone.len(),
+                                    key_clone,
+                                    popped_element.len(),
+                                    popped_element
+                                );
                             }
                         }
                     }
@@ -488,13 +492,14 @@ impl Command {
                 // If no element available, start blocking
                 let start_time = Instant::now();
                 let mut interval = interval(Duration::from_millis(10)); // Check every 10ms
-
                 loop {
                     interval.tick().await;
 
                     // Check if timeout reached (if timeout > 0)
-                    if timeout > 0 {
-                        let elapsed = start_time.elapsed().as_secs() as isize;
+                    if timeout > 0.0 {
+                        // dbg!("ENTERS HERE");
+                        let elapsed = start_time.elapsed().as_secs() as f64;
+                        dbg!(elapsed);
                         if elapsed >= timeout {
                             return "$-1\r\n".to_string(); // Timeout reached
                         }
@@ -507,9 +512,13 @@ impl Command {
                             if !list.is_empty() {
                                 let popped_element = list.remove(0);
                                 // Return array with key name and popped element
-                                return format!("*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n", 
-                                    key_clone.len(), key_clone, 
-                                    popped_element.len(), popped_element);
+                                return format!(
+                                    "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                                    key_clone.len(),
+                                    key_clone,
+                                    popped_element.len(),
+                                    popped_element
+                                );
                             }
                         }
                     }
