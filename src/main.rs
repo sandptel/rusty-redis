@@ -311,8 +311,10 @@ impl Command {
                 let mut db = database.lock().unwrap();
                 let final_list = if let Some(existing_value) = db.get(key) {
                     if let RedisValue::List(old_list) = existing_value {
-                        // LPUSH prepends to the beginning
+                        // LPUSH prepends elements one by one from left to right
+                        // So we need to reverse the new elements and prepend them
                         let mut final_list = list.clone();
+                        final_list.reverse(); // Reverse the new elements
                         final_list.extend_from_slice(old_list);
                         final_list
                     } else {
@@ -320,8 +322,10 @@ impl Command {
                         return "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string();
                     }
                 } else {
-                    // Key doesn't exist, create new list
-                    list.clone()
+                    // Key doesn't exist, create new list with reversed elements
+                    let mut final_list = list.clone();
+                    final_list.reverse();
+                    final_list
                 };
 
                 db.insert(key.clone(), RedisValue::from_list(final_list.clone()));
