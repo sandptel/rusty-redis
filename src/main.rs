@@ -134,6 +134,7 @@ pub enum Command {
     RPUSH(String, Vec<String>),
     LRANGE(String, isize, isize),
     LLEN(String),
+    LPOP(String),
     UNKNOWN,
 }
 
@@ -241,6 +242,13 @@ impl Command {
                         "LLEN" if arr.len() > 1 => {
                             if let Value::Bulk(key_bytes) = &arr[1] {
                                 Command::LLEN(key_bytes.clone())
+                            } else {
+                                Command::UNKNOWN
+                            }
+                        }
+                        "LPOP" if arr.len() > 1 => {
+                            if let Value::Bulk(key_bytes) = &arr[1] {
+                                Command::LPOP(key_bytes.clone())
                             } else {
                                 Command::UNKNOWN
                             }
@@ -393,8 +401,26 @@ impl Command {
                     } else {
                         ":0\r\n".to_string()
                     }
-                }else{
+                } else {
                     ":0\r\n".to_string()
+                }
+            }
+            Command::LPOP(key) => {
+                let mut db = database.lock().unwrap();
+                if let Some(msg) = db.get(key) {
+                    if let RedisValue::List(list) = msg {
+                        // format!(":{}\r\n", list.len())
+                        let mut popped_list = list.clone();
+                        let popped_element = popped_list.remove(0);
+
+                        let response = RedisValue::from_string(popped_element).get_response();
+                        db.insert(key.clone(), RedisValue::from_list(popped_list.clone()));
+                        response
+                    } else {
+                        "$-1\r\n".to_string()
+                    }
+                } else {
+                    "$-1\r\n".to_string()
                 }
             }
             Command::UNKNOWN => "-ERR unknown command\r\n".to_string(),
