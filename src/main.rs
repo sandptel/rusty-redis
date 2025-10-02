@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 use std::error::Error;
+use std::vec;
 use tokio::net::TcpListener;
 use tokio::time::{ sleep_until, Instant, Duration };
 use std::future::Future;
@@ -13,13 +14,81 @@ use std::io::BufReader;
 
 pub const DEFAULT_EXPIRY: u64 = 1000;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum RedisValue {
+    String(String),
+    List(Vec<String>),
+    Hash(HashMap<String, String>),
+}
+
+impl RedisValue {
+    fn from_string(value: String) -> RedisValue {
+        RedisValue::String(value)
+    }
+    fn from_list(list: Vec<String>) -> RedisValue {
+        RedisValue::List(list)
+    }
+    pub fn get_response(&self) -> String {
+        match self {
+            // Simple string value - return as bulk string
+            RedisValue::String(s) => { format!("${}\r\n{}\r\n", s.len(), s) }
+
+            // List - return as array of bulk strings
+            RedisValue::List(list) => {
+                if list.is_empty() {
+                    "*0\r\n".to_string()
+                } else {
+                    let mut response = format!("*{}\r\n", list.len());
+                    for item in list {
+                        response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
+                    }
+                    response
+                }
+            }
+
+            // Set - return as array of bulk strings
+            // RedisValue::Set(set) => {
+            //     if set.is_empty() {
+            //         "*0\r\n".to_string()
+            //     } else {
+            //         let mut response = format!("*{}\r\n", set.len());
+            //         for item in set {
+            //             response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
+            //         }
+            //         response
+            //     }
+            // }
+
+            // Hash - return as array of field-value pairs (flattened)
+            RedisValue::Hash(hash) => {
+                if hash.is_empty() {
+                    "*0\r\n".to_string()
+                } else {
+                    // Each key-value pair becomes 2 elements in the array
+                    let mut response = format!("*{}\r\n", hash.len() * 2);
+                    for (key, value) in hash {
+                        response.push_str(&format!("${}\r\n{}\r\n", key.len(), key));
+                        response.push_str(&format!("${}\r\n{}\r\n", value.len(), value));
+                    }
+                    response
+                }
+            }
+        }
+    }
+
+    /// Returns null response when key doesn't exist
+    pub fn get_null_response() -> String {
+        "$-1\r\n".to_string()
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
     println!("Listening on 127.0.0.1:6379");
 
     // Shared database across all connections
-    let database: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    let database: Arc<Mutex<HashMap<String, RedisValue>>> = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         let (mut socket, _) = listener.accept().await?;
@@ -61,6 +130,8 @@ pub enum Command {
     SET(String, String),
     SetExpiry(String, String, String, String),
     GET(String),
+    LPUSH(String, Vec<String>),
+    RPUSH(String, Vec<String>),
     UNKNOWN,
 }
 
@@ -111,6 +182,47 @@ impl Command {
                                 Command::UNKNOWN
                             }
                         }
+                        "RPUSH" if arr.len() > 1 => {
+                            let mut value_array: Vec<String> = vec![];
+                            if let Value::Bulk(key_bytes) = &arr[1] {
+                                for (i, value) in arr.iter().enumerate() {
+                                    if i > 1 {
+                                        if let Value::Bulk(val) = value {
+                                            println!("value parsed: {:?}", value);
+                                            value_array.push(val.clone());
+                                        } else {
+                                            eprintln!("{:?}: was not parsed correctly", value);
+                                        }
+                                    }
+                                }
+                                return Command::RPUSH(key_bytes.clone(), value_array);
+                            } else {
+                                eprintln!("The key_bytes {:?}: was not parsed correctly", &arr[1]);
+                            }
+
+                            Command::UNKNOWN
+                        }
+                        "LPUSH" if arr.len() > 1 => {
+                            let mut value_array: Vec<String> = vec![];
+                            if let Value::Bulk(key_bytes) = &arr[1] {
+                                for (i, value) in arr.iter().enumerate() {
+                                    if i > 1 {
+                                        if let Value::Bulk(val) = value {
+                                            println!("value parsed: {:?}", value);
+                                            value_array.push(val.clone());
+                                        } else {
+                                            eprintln!("{:?}: was not parsed correctly", value);
+                                        }
+                                    }
+                                }
+                                return Command::LPUSH(key_bytes.clone(), value_array);
+                            } else {
+                                eprintln!("The key_bytes {:?}: was not parsed correctly", &arr[1]);
+                            }
+
+                            // Command::LPUSH(, ())
+                            Command::UNKNOWN
+                        }
                         "GET" if arr.len() > 1 => {
                             if let Value::Bulk(key_bytes) = &arr[1] {
                                 Command::GET(key_bytes.clone())
@@ -128,20 +240,21 @@ impl Command {
         }
     }
 
-    pub async fn get_return(&self, database: &Arc<Mutex<HashMap<String, String>>>) -> String {
+    pub async fn get_return(&self, database: &Arc<Mutex<HashMap<String, RedisValue>>>) -> String {
         match self {
             Command::PING => "+PONG\r\n".to_string(),
             Command::ECHO(msg) => format!("${}\r\n{}\r\n", msg.len(), msg),
             Command::SET(key, value) => {
                 let mut db = database.lock().unwrap();
-                db.insert(key.clone(), value.clone());
-
+                let value = RedisValue::from_string(value.clone());
+                db.insert(key.clone(), value);
                 "+OK\r\n".to_string()
             }
             Command::SetExpiry(key, value, expiry_command, timeout) => {
                 {
                     let mut db = database.lock().unwrap();
-                    db.insert(key.clone(), value.clone());
+                    let value = RedisValue::from_string(value.clone());
+                    db.insert(key.clone(), value);
                 } // MutexGuard is dropped here
 
                 // Clone the values before moving into spawned task
@@ -149,7 +262,7 @@ impl Command {
                 let key_clone = key.clone();
                 let expiry_command_clone = expiry_command.clone();
                 let timeout_clone = timeout.clone();
-                
+
                 tokio::spawn(async move {
                     let timeout: u64 = timeout_clone.parse().unwrap_or(DEFAULT_EXPIRY);
                     let expiry_time = match expiry_command_clone.as_str() {
@@ -160,19 +273,19 @@ impl Command {
                             Duration::from_millis(DEFAULT_EXPIRY)
                         }
                     };
-                    
+
                     let now = Instant::now();
                     let later = now + expiry_time;
-                    
+
                     sleep_until(later).await;
-                    
+
                     let mut db = db_clone.lock().unwrap();
                     match db.remove(&key_clone) {
                         None => {
                             eprintln!("The key to be removed is not found in the database: {}", key_clone);
                         }
                         Some(x) => {
-                            println!("Removed the Key: {} after expiry: {}", key_clone, x);
+                            println!("Removed the Key: {:?} after expiry: {:?}", key_clone, x);
                         }
                     }
                 });
@@ -180,10 +293,69 @@ impl Command {
                 // Return OK immediately
                 "+OK\r\n".to_string()
             }
+            Command::LPUSH(key, list) => {
+                let mut db = database.lock().unwrap();
+                if let Some(msg) = db.get(key) {
+                    if let RedisValue::List(old_list) = msg {
+                        let mut final_list: Vec<String> = old_list.clone();
+                        for value in list.iter() {
+                            final_list.push(value.clone());
+                        }
+                        // final_list.append(&mut old_list);
+                        let len = final_list.len();
+                        dbg!("len: {}", len);
+                        let redis_value = RedisValue::from_list(final_list);
+                        db.insert(key.clone(), redis_value);
+                        return format!(":{}\r\n", len);
+                    } else {
+                        "$-1\r\n".to_string()
+                    }
+                } else {
+                    let mut final_list = vec![];
+                    for value in list.iter() {
+                        final_list.push(value.clone());
+                    }
+                    let len = final_list.len();
+                    dbg!("len: {}", len);
+                    let redis_value = RedisValue::from_list(final_list);
+                    db.insert(key.clone(), redis_value);
+                    return format!(":{}\r\n", len);
+                }
+            }
+            Command::RPUSH(key, list) => {
+                let mut db = database.lock().unwrap();
+                if let Some(msg) = db.get(key) {
+                    if let RedisValue::List(old_list) = msg {
+                        let mut final_list: Vec<String> = old_list.clone();
+                        for value in list.iter() {
+                            final_list.push(value.clone());
+                        }
+                        // final_list.append(&mut old_list);
+                        let len = final_list.len();
+                        dbg!("len: {}", len);
+                        let redis_value = RedisValue::from_list(final_list);
+                        db.insert(key.clone(), redis_value);
+                        return format!(":{}\r\n", len);
+                    } else {
+                        "$-1\r\n".to_string()
+                    }
+                } else {
+                    let mut final_list = vec![];
+                    for value in list.iter() {
+                        final_list.push(value.clone());
+                    }
+                    let len = final_list.len();
+                    dbg!("len: {}", len);
+                    let redis_value = RedisValue::from_list(final_list);
+                    db.insert(key.clone(), redis_value);
+                    return format!(":{}\r\n", len);
+                }
+            }
             Command::GET(key) => {
                 let db = database.lock().unwrap();
                 if let Some(msg) = db.get(key) {
-                    format!("${}\r\n{}\r\n", msg.len(), msg)
+                    let response = msg.get_response();
+                    response
                 } else {
                     "$-1\r\n".to_string()
                 }
