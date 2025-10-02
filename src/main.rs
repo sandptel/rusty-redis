@@ -132,7 +132,7 @@ pub enum Command {
     GET(String),
     LPUSH(String, Vec<String>),
     RPUSH(String, Vec<String>),
-    // LRANGE(i32,i32),
+    LRANGE(String, isize, isize),
     UNKNOWN,
 }
 
@@ -224,6 +224,19 @@ impl Command {
                             // Command::LPUSH(, ())
                             Command::UNKNOWN
                         }
+                        "LRANGE" if arr.len() > 1 => {
+                            if
+                                let (Value::Bulk(key_bytes), Value::Bulk(start), Value::Bulk(end)) =
+                                    (&arr[1], &arr[2], &arr[3])
+                            {
+                                let start: isize = start.parse().unwrap();
+                                let end: isize = end.parse().unwrap();
+                                Command::LRANGE(key_bytes.clone(), start, end)
+                            } else {
+                                eprintln!("The values for LRANGE are not correctly formatted");
+                                Command::UNKNOWN
+                            }
+                        }
                         "GET" if arr.len() > 1 => {
                             if let Value::Bulk(key_bytes) = &arr[1] {
                                 Command::GET(key_bytes.clone())
@@ -310,7 +323,7 @@ impl Command {
                     // Key doesn't exist, create new list
                     list.clone()
                 };
-                
+
                 db.insert(key.clone(), RedisValue::from_list(final_list.clone()));
                 format!(":{}\r\n", final_list.len())
             }
@@ -330,9 +343,26 @@ impl Command {
                     // Key doesn't exist, create new list
                     list.clone()
                 };
-                
+
                 db.insert(key.clone(), RedisValue::from_list(final_list.clone()));
                 format!(":{}\r\n", final_list.len())
+            }
+            Command::LRANGE(key, start, end) => {
+                let db = database.lock().unwrap();
+                if let Some(msg) = db.get(key) {
+                    // let slice =
+                    if let RedisValue::List(list) = msg {
+                        let slice = lrange_slice_vec(list, *start, *end);
+                        let slice = RedisValue::from_list(slice);
+                        let response = slice.get_response();
+                        response
+                    } else {
+                        eprintln!("Error Fetching value from the database");
+                        "$-1\r\n".to_string()
+                    }
+                } else {
+                    "$-1\r\n".to_string()
+                }
             }
             Command::GET(key) => {
                 let db = database.lock().unwrap();
@@ -346,4 +376,32 @@ impl Command {
             Command::UNKNOWN => "-ERR unknown command\r\n".to_string(),
         }
     }
+}
+
+pub fn lrange_slice_vec(list: &Vec<String>, start: isize, stop: isize) -> Vec<String> {
+    let len = list.len() as isize;
+    if len == 0 {
+        return Vec::new();
+    }
+
+    // Convert negative indices to positive (counting from end)
+    let mut actual_start = if start < 0 { len + start } else { start };
+    let mut actual_stop = if stop < 0 { len + stop } else { stop };
+
+    // Clamp indices to bounds
+    if actual_start < 0 {
+        actual_start = 0;
+    }
+    if actual_stop >= len {
+        actual_stop = len - 1;
+    }
+
+    if actual_start > actual_stop || actual_start >= len {
+        return Vec::new();
+    }
+
+    // Inclusive end index, exclusive for Rust slice
+    let st = actual_start as usize;
+    let en = (actual_stop + 1) as usize;
+    list[st..en.min(list.len())].to_vec()
 }
