@@ -3,7 +3,7 @@ use std::error::Error;
 use std::ops::Index;
 use std::vec;
 use tokio::net::TcpListener;
-use tokio::time::{ sleep_until, Instant, Duration };
+use tokio::time::{ sleep_until, Instant, Duration, interval };
 use std::future::Future;
 use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 use bytes::BytesMut;
@@ -136,6 +136,7 @@ pub enum Command {
     LRANGE(String, isize, isize),
     LLEN(String),
     LPOP(String, Option<isize>),
+    BLPOP(String, isize),
     UNKNOWN,
 }
 
@@ -270,6 +271,19 @@ impl Command {
                         "GET" if arr.len() > 1 => {
                             if let Value::Bulk(key_bytes) = &arr[1] {
                                 Command::GET(key_bytes.clone())
+                            } else {
+                                Command::UNKNOWN
+                            }
+                        }
+                        "BLPOP" if arr.len() > 2 => {
+                            if
+                                let (Value::Bulk(key_bytes), Value::Bulk(timeout)) = (
+                                    &arr[1],
+                                    &arr[2],
+                                )
+                            {
+                                let timeout: isize = timeout.parse().unwrap_or(0);
+                                Command::BLPOP(key_bytes.clone(), timeout)
                             } else {
                                 Command::UNKNOWN
                             }
@@ -448,6 +462,59 @@ impl Command {
                     }
                 } else {
                     "$-1\r\n".to_string()
+                }
+            }
+            Command::BLPOP(key, timeout_duration) => {
+                let db_clone = Arc::clone(database);
+                let key_clone = key.clone();
+                let timeout = *timeout_duration;
+
+                // First check if there's already an element available
+                {
+                    let mut db = db_clone.lock().unwrap();
+                    if let Some(redis_value) = db.get_mut(&key_clone) {
+                        if let RedisValue::List(list) = redis_value {
+                            if !list.is_empty() {
+                                let popped_element = list.remove(0);
+                                // Return array with key name and popped element
+                                return format!("*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n", 
+                                    key_clone.len(), key_clone, 
+                                    popped_element.len(), popped_element);
+                            }
+                        }
+                    }
+                }
+
+                // If no element available, start blocking
+                let start_time = Instant::now();
+                let mut interval = interval(Duration::from_millis(10)); // Check every 10ms
+
+                loop {
+                    interval.tick().await;
+
+                    // Check if timeout reached (if timeout > 0)
+                    if timeout > 0 {
+                        let elapsed = start_time.elapsed().as_secs() as isize;
+                        if elapsed >= timeout {
+                            return "$-1\r\n".to_string(); // Timeout reached
+                        }
+                    }
+
+                    // Check if element is now available
+                    let mut db = db_clone.lock().unwrap();
+                    if let Some(redis_value) = db.get_mut(&key_clone) {
+                        if let RedisValue::List(list) = redis_value {
+                            if !list.is_empty() {
+                                let popped_element = list.remove(0);
+                                // Return array with key name and popped element
+                                return format!("*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n", 
+                                    key_clone.len(), key_clone, 
+                                    popped_element.len(), popped_element);
+                            }
+                        }
+                    }
+                    // Drop the lock to allow other operations to modify the list
+                    drop(db);
                 }
             }
             Command::UNKNOWN => "-ERR unknown command\r\n".to_string(),
