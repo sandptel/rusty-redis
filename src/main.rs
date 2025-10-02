@@ -501,7 +501,7 @@ impl Command {
                         let elapsed = start_time.elapsed().as_secs() as f64;
                         dbg!(elapsed);
                         if elapsed >= timeout {
-                            return "$-1\r\n".to_string(); // Timeout reached
+                            return "*-1\r\n".to_string(); // Timeout reached
                         }
                     }
 
