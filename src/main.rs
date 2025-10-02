@@ -133,6 +133,7 @@ pub enum Command {
     LPUSH(String, Vec<String>),
     RPUSH(String, Vec<String>),
     LRANGE(String, isize, isize),
+    LLEN(String),
     UNKNOWN,
 }
 
@@ -234,6 +235,13 @@ impl Command {
                                 Command::LRANGE(key_bytes.clone(), start, end)
                             } else {
                                 eprintln!("The values for LRANGE are not correctly formatted");
+                                Command::UNKNOWN
+                            }
+                        }
+                        "LLEN" if arr.len() > 1 => {
+                            if let Value::Bulk(key_bytes) = &arr[1] {
+                                Command::LLEN(key_bytes.clone())
+                            } else {
                                 Command::UNKNOWN
                             }
                         }
@@ -375,6 +383,18 @@ impl Command {
                     response
                 } else {
                     "$-1\r\n".to_string()
+                }
+            }
+            Command::LLEN(key) => {
+                let db = database.lock().unwrap();
+                if let Some(msg) = db.get(key) {
+                    if let RedisValue::List(list) = msg {
+                        format!(":{}\r\n", list.len())
+                    } else {
+                        ":0\r\n".to_string()
+                    }
+                }else{
+                    ":0\r\n".to_string()
                 }
             }
             Command::UNKNOWN => "-ERR unknown command\r\n".to_string(),
