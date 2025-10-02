@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 use std::error::Error;
+use std::ops::Index;
 use std::vec;
 use tokio::net::TcpListener;
 use tokio::time::{ sleep_until, Instant, Duration };
@@ -134,7 +135,7 @@ pub enum Command {
     RPUSH(String, Vec<String>),
     LRANGE(String, isize, isize),
     LLEN(String),
-    LPOP(String),
+    LPOP(String, Option<isize>),
     UNKNOWN,
 }
 
@@ -246,9 +247,22 @@ impl Command {
                                 Command::UNKNOWN
                             }
                         }
-                        "LPOP" if arr.len() > 1 => {
+                        "LPOP" if arr.len() == 2 => {
                             if let Value::Bulk(key_bytes) = &arr[1] {
-                                Command::LPOP(key_bytes.clone())
+                                Command::LPOP(key_bytes.clone(), None)
+                            } else {
+                                Command::UNKNOWN
+                            }
+                        }
+                        "LPOP" if arr.len() > 2 => {
+                            if
+                                let (Value::Bulk(key_bytes), Value::Bulk(to_remove)) = (
+                                    &arr[1],
+                                    &arr[2],
+                                )
+                            {
+                                let to_remove = to_remove.parse().unwrap();
+                                Command::LPOP(key_bytes.clone(), Some(to_remove))
                             } else {
                                 Command::UNKNOWN
                             }
@@ -405,15 +419,28 @@ impl Command {
                     ":0\r\n".to_string()
                 }
             }
-            Command::LPOP(key) => {
+            Command::LPOP(key, to_remove) => {
                 let mut db = database.lock().unwrap();
                 if let Some(msg) = db.get(key) {
                     if let RedisValue::List(list) = msg {
                         // format!(":{}\r\n", list.len())
                         let mut popped_list = list.clone();
-                        let popped_element = popped_list.remove(0);
-
-                        let response = RedisValue::from_string(popped_element).get_response();
+                        let mut response = "".to_string();
+                        if let Some(index) = *to_remove {
+                            if index > (popped_list.len() as isize) {
+                                eprintln!("Error: Index exceeds the mentioned value");
+                                return "$-1\r\n".to_string();
+                            }
+                            let mut response_list: Vec<String> = vec![];
+                            for i in 0..index {
+                                let popped_element = popped_list.remove(0);
+                                response_list.push(popped_element);
+                            }
+                            response = RedisValue::from_list(response_list).get_response();
+                        } else {
+                            let popped_element = popped_list.remove(0);
+                            response = RedisValue::from_string(popped_element).get_response();
+                        }
                         db.insert(key.clone(), RedisValue::from_list(popped_list.clone()));
                         response
                     } else {
