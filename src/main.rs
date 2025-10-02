@@ -132,6 +132,7 @@ pub enum Command {
     GET(String),
     LPUSH(String, Vec<String>),
     RPUSH(String, Vec<String>),
+    // LRANGE(i32,i32),
     UNKNOWN,
 }
 
@@ -295,61 +296,43 @@ impl Command {
             }
             Command::LPUSH(key, list) => {
                 let mut db = database.lock().unwrap();
-                if let Some(msg) = db.get(key) {
-                    if let RedisValue::List(old_list) = msg {
-                        let mut final_list: Vec<String> = old_list.clone();
-                        for value in list.iter() {
-                            final_list.push(value.clone());
-                        }
-                        // final_list.append(&mut old_list);
-                        let len = final_list.len();
-                        dbg!("len: {}", len);
-                        let redis_value = RedisValue::from_list(final_list);
-                        db.insert(key.clone(), redis_value);
-                        return format!(":{}\r\n", len);
+                let final_list = if let Some(existing_value) = db.get(key) {
+                    if let RedisValue::List(old_list) = existing_value {
+                        // LPUSH prepends to the beginning
+                        let mut final_list = list.clone();
+                        final_list.extend_from_slice(old_list);
+                        final_list
                     } else {
-                        "$-1\r\n".to_string()
+                        // Key exists but is not a list - error in Redis
+                        return "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string();
                     }
                 } else {
-                    let mut final_list = vec![];
-                    for value in list.iter() {
-                        final_list.push(value.clone());
-                    }
-                    let len = final_list.len();
-                    dbg!("len: {}", len);
-                    let redis_value = RedisValue::from_list(final_list);
-                    db.insert(key.clone(), redis_value);
-                    return format!(":{}\r\n", len);
-                }
+                    // Key doesn't exist, create new list
+                    list.clone()
+                };
+                
+                db.insert(key.clone(), RedisValue::from_list(final_list.clone()));
+                format!(":{}\r\n", final_list.len())
             }
             Command::RPUSH(key, list) => {
                 let mut db = database.lock().unwrap();
-                if let Some(msg) = db.get(key) {
-                    if let RedisValue::List(old_list) = msg {
-                        let mut final_list: Vec<String> = old_list.clone();
-                        for value in list.iter() {
-                            final_list.push(value.clone());
-                        }
-                        // final_list.append(&mut old_list);
-                        let len = final_list.len();
-                        dbg!("len: {}", len);
-                        let redis_value = RedisValue::from_list(final_list);
-                        db.insert(key.clone(), redis_value);
-                        return format!(":{}\r\n", len);
+                let final_list = if let Some(existing_value) = db.get(key) {
+                    if let RedisValue::List(old_list) = existing_value {
+                        // RPUSH appends to the end
+                        let mut final_list = old_list.clone();
+                        final_list.extend_from_slice(list);
+                        final_list
                     } else {
-                        "$-1\r\n".to_string()
+                        // Key exists but is not a list - error in Redis
+                        return "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string();
                     }
                 } else {
-                    let mut final_list = vec![];
-                    for value in list.iter() {
-                        final_list.push(value.clone());
-                    }
-                    let len = final_list.len();
-                    dbg!("len: {}", len);
-                    let redis_value = RedisValue::from_list(final_list);
-                    db.insert(key.clone(), redis_value);
-                    return format!(":{}\r\n", len);
-                }
+                    // Key doesn't exist, create new list
+                    list.clone()
+                };
+                
+                db.insert(key.clone(), RedisValue::from_list(final_list.clone()));
+                format!(":{}\r\n", final_list.len())
             }
             Command::GET(key) => {
                 let db = database.lock().unwrap();
