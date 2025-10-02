@@ -358,10 +358,10 @@ impl Command {
                         response
                     } else {
                         eprintln!("Error Fetching value from the database");
-                        "$-1\r\n".to_string()
+                        "*0\r\n".to_string()
                     }
                 } else {
-                    "$-1\r\n".to_string()
+                    "*0\r\n".to_string()
                 }
             }
             Command::GET(key) => {
