@@ -1,8 +1,9 @@
 #![allow(unused_imports)]
 use std::error::Error;
+use std::ops::Index;
 use std::vec;
 use tokio::net::TcpListener;
-use tokio::time::{ sleep_until, Instant, Duration };
+use tokio::time::{ sleep_until, Instant, Duration, interval };
 use std::future::Future;
 use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 use bytes::BytesMut;
@@ -76,6 +77,34 @@ impl RedisValue {
         }
     }
 
+    // The TYPE command returns the type of value stored at a given key. These types include: string, list, set, zset, hash, stream, and vectorset.
+    // Server should respond with +string\r\n, which is string encoded as a simple string.
+    pub fn get_type_response(&self) -> String {
+        match self {
+            // Simple string value - return as bulk string
+            RedisValue::String(s) => { "+string\r\n".to_string() }
+
+            // List - return as array of bulk strings
+            RedisValue::List(list) => { "+list\r\n".to_string() }
+
+            // Set - return as array of bulk strings
+            // RedisValue::Set(set) => {
+            //     if set.is_empty() {
+            //         "*0\r\n".to_string()
+            //     } else {
+            //         let mut response = format!("*{}\r\n", set.len());
+            //         for item in set {
+            //             response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
+            //         }
+            //         response
+            //     }
+            // }
+
+            // Hash - return as array of field-value pairs (flattened)
+            RedisValue::Hash(hash) => { "+hash\r\n".to_string() }
+        }
+    }
+
     /// Returns null response when key doesn't exist
     pub fn get_null_response() -> String {
         "$-1\r\n".to_string()
@@ -130,11 +159,13 @@ pub enum Command {
     SET(String, String),
     SetExpiry(String, String, String, String),
     GET(String),
+    TYPE(String),
     LPUSH(String, Vec<String>),
     RPUSH(String, Vec<String>),
     LRANGE(String, isize, isize),
     LLEN(String),
-    LPOP(String),
+    LPOP(String, Option<isize>),
+    BLPOP(String, f64),
     UNKNOWN,
 }
 
@@ -246,9 +277,22 @@ impl Command {
                                 Command::UNKNOWN
                             }
                         }
-                        "LPOP" if arr.len() > 1 => {
+                        "LPOP" if arr.len() == 2 => {
                             if let Value::Bulk(key_bytes) = &arr[1] {
-                                Command::LPOP(key_bytes.clone())
+                                Command::LPOP(key_bytes.clone(), None)
+                            } else {
+                                Command::UNKNOWN
+                            }
+                        }
+                        "LPOP" if arr.len() > 2 => {
+                            if
+                                let (Value::Bulk(key_bytes), Value::Bulk(to_remove)) = (
+                                    &arr[1],
+                                    &arr[2],
+                                )
+                            {
+                                let to_remove = to_remove.parse().unwrap();
+                                Command::LPOP(key_bytes.clone(), Some(to_remove))
                             } else {
                                 Command::UNKNOWN
                             }
@@ -256,6 +300,26 @@ impl Command {
                         "GET" if arr.len() > 1 => {
                             if let Value::Bulk(key_bytes) = &arr[1] {
                                 Command::GET(key_bytes.clone())
+                            } else {
+                                Command::UNKNOWN
+                            }
+                        }
+                        "TYPE" if arr.len() > 1 => {
+                            if let Value::Bulk(key_bytes) = &arr[1] {
+                                Command::TYPE(key_bytes.clone())
+                            } else {
+                                Command::UNKNOWN
+                            }
+                        }
+                        "BLPOP" if arr.len() > 2 => {
+                            if
+                                let (Value::Bulk(key_bytes), Value::Bulk(timeout)) = (
+                                    &arr[1],
+                                    &arr[2],
+                                )
+                            {
+                                let timeout: f64 = timeout.parse().unwrap_or(0.0);
+                                Command::BLPOP(key_bytes.clone(), timeout)
                             } else {
                                 Command::UNKNOWN
                             }
@@ -290,7 +354,7 @@ impl Command {
                 // Clone the values before moving into spawned task
                 let db_clone = Arc::clone(database);
                 let key_clone = key.clone();
-                let expiry_command_clone = expiry_command.clone();
+                let expiry_command_clone = expiry_command.clone().to_lowercase();
                 let timeout_clone = timeout.clone();
 
                 tokio::spawn(async move {
@@ -393,6 +457,15 @@ impl Command {
                     "$-1\r\n".to_string()
                 }
             }
+            Command::TYPE(key) => {
+                let db = database.lock().unwrap();
+                if let Some(msg) = db.get(key) {
+                    let response = msg.get_type_response();
+                    response
+                } else {
+                    "+none\r\n".to_string()
+                }
+            }
             Command::LLEN(key) => {
                 let db = database.lock().unwrap();
                 if let Some(msg) = db.get(key) {
@@ -405,15 +478,28 @@ impl Command {
                     ":0\r\n".to_string()
                 }
             }
-            Command::LPOP(key) => {
+            Command::LPOP(key, to_remove) => {
                 let mut db = database.lock().unwrap();
                 if let Some(msg) = db.get(key) {
                     if let RedisValue::List(list) = msg {
                         // format!(":{}\r\n", list.len())
                         let mut popped_list = list.clone();
-                        let popped_element = popped_list.remove(0);
-
-                        let response = RedisValue::from_string(popped_element).get_response();
+                        let mut response = "".to_string();
+                        if let Some(index) = *to_remove {
+                            if index > (popped_list.len() as isize) {
+                                eprintln!("Error: Index exceeds the mentioned value");
+                                return "$-1\r\n".to_string();
+                            }
+                            let mut response_list: Vec<String> = vec![];
+                            for i in 0..index {
+                                let popped_element = popped_list.remove(0);
+                                response_list.push(popped_element);
+                            }
+                            response = RedisValue::from_list(response_list).get_response();
+                        } else {
+                            let popped_element = popped_list.remove(0);
+                            response = RedisValue::from_string(popped_element).get_response();
+                        }
                         db.insert(key.clone(), RedisValue::from_list(popped_list.clone()));
                         response
                     } else {
@@ -421,6 +507,68 @@ impl Command {
                     }
                 } else {
                     "$-1\r\n".to_string()
+                }
+            }
+            Command::BLPOP(key, timeout_duration) => {
+                let db_clone = Arc::clone(database);
+                let key_clone = key.clone();
+                let timeout = *timeout_duration;
+
+                // First check if there's already an element available
+                {
+                    let mut db = db_clone.lock().unwrap();
+                    if let Some(redis_value) = db.get_mut(&key_clone) {
+                        if let RedisValue::List(list) = redis_value {
+                            if !list.is_empty() {
+                                let popped_element = list.remove(0);
+                                // Return array with key name and popped element
+                                return format!(
+                                    "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                                    key_clone.len(),
+                                    key_clone,
+                                    popped_element.len(),
+                                    popped_element
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // If no element available, start blocking
+                let start_time = Instant::now();
+                let mut interval = interval(Duration::from_millis(10)); // Check every 10ms
+                loop {
+                    interval.tick().await;
+
+                    // Check if timeout reached (if timeout > 0)
+                    if timeout > 0.0 {
+                        // dbg!("ENTERS HERE");
+                        let elapsed = start_time.elapsed().as_secs() as f64;
+                        dbg!(elapsed);
+                        if elapsed >= timeout {
+                            return "*-1\r\n".to_string(); // Timeout reached
+                        }
+                    }
+
+                    // Check if element is now available
+                    let mut db = db_clone.lock().unwrap();
+                    if let Some(redis_value) = db.get_mut(&key_clone) {
+                        if let RedisValue::List(list) = redis_value {
+                            if !list.is_empty() {
+                                let popped_element = list.remove(0);
+                                // Return array with key name and popped element
+                                return format!(
+                                    "*2\r\n${}\r\n{}\r\n${}\r\n{}\r\n",
+                                    key_clone.len(),
+                                    key_clone,
+                                    popped_element.len(),
+                                    popped_element
+                                );
+                            }
+                        }
+                    }
+                    // Drop the lock to allow other operations to modify the list
+                    drop(db);
                 }
             }
             Command::UNKNOWN => "-ERR unknown command\r\n".to_string(),
