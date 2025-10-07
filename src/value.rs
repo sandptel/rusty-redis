@@ -1,11 +1,18 @@
 use std::collections::HashMap;
 
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisValue {
     String(String),
     List(Vec<String>),
     Hash(HashMap<String, String>),
+    Stream(Vec<StreamEntry>),
+}
+
+#[derive(Clone,Debug, PartialEq, Eq)]
+pub struct StreamEntry {
+    pub id: String,
+    pub fields: HashMap<String, String>,
 }
 
 impl RedisValue {
@@ -15,6 +22,10 @@ impl RedisValue {
     pub fn from_list(list: Vec<String>) -> RedisValue {
         RedisValue::List(list)
     }
+    pub fn from_stream(entries: Vec<StreamEntry>) -> Self {
+        RedisValue::Stream(entries)
+    }
+
     pub fn get_response(&self) -> String {
         match self {
             // Simple string value - return as bulk string
@@ -33,19 +44,6 @@ impl RedisValue {
                 }
             }
 
-            // Set - return as array of bulk strings
-            // RedisValue::Set(set) => {
-            //     if set.is_empty() {
-            //         "*0\r\n".to_string()
-            //     } else {
-            //         let mut response = format!("*{}\r\n", set.len());
-            //         for item in set {
-            //             response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
-            //         }
-            //         response
-            //     }
-            // }
-
             // Hash - return as array of field-value pairs (flattened)
             RedisValue::Hash(hash) => {
                 if hash.is_empty() {
@@ -60,6 +58,8 @@ impl RedisValue {
                     response
                 }
             }
+
+            RedisValue::Stream(_) => "+stream\r\n".to_string(),
         }
     }
 
@@ -73,21 +73,9 @@ impl RedisValue {
             // List - return as array of bulk strings
             RedisValue::List(list) => { "+list\r\n".to_string() }
 
-            // Set - return as array of bulk strings
-            // RedisValue::Set(set) => {
-            //     if set.is_empty() {
-            //         "*0\r\n".to_string()
-            //     } else {
-            //         let mut response = format!("*{}\r\n", set.len());
-            //         for item in set {
-            //             response.push_str(&format!("${}\r\n{}\r\n", item.len(), item));
-            //         }
-            //         response
-            //     }
-            // }
+            RedisValue::Hash(list) => { "+stream\r\n".to_string() }
 
-            // Hash - return as array of field-value pairs (flattened)
-            RedisValue::Hash(hash) => { "+hash\r\n".to_string() }
+            RedisValue::Stream(_) => "+stream\r\n".to_string(),
         }
     }
 

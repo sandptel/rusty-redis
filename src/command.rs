@@ -13,9 +13,8 @@ use std::sync::{ Arc, Mutex };
 use resp::{ Decoder, Value };
 use std::io::BufReader;
 pub const DEFAULT_EXPIRY: u64 = 1000;
-use crate::value::RedisValue;
+use crate::value::{RedisValue, StreamEntry};
 pub enum Command {
-
     PING,
     ECHO(String),
     SET(String, String),
@@ -28,6 +27,7 @@ pub enum Command {
     LLEN(String),
     LPOP(String, Option<isize>),
     BLPOP(String, f64),
+    XADD(String, String, HashMap<String, String>),
     UNKNOWN,
 }
 
@@ -118,6 +118,27 @@ impl Command {
 
                             // Command::LPUSH(, ())
                             Command::UNKNOWN
+                        }
+                        "XADD" if arr.len() >= 5 => {
+                            if let (Value::Bulk(key_bytes), Value::Bulk(entry_id_bytes)) = (&arr[1], &arr[2]) {
+                                if (arr.len() - 3) % 2 != 0 {
+                                    return Command::UNKNOWN;
+                                }
+                                let mut field_pairs = HashMap::new();
+                                let mut idx = 3;
+                                while idx + 1 < arr.len() {
+                                    match (&arr[idx], &arr[idx + 1]) {
+                                        (Value::Bulk(field), Value::Bulk(val)) => {
+                                            field_pairs.insert(field.clone(), val.clone());
+                                            idx += 2;
+                                        }
+                                        _ => return Command::UNKNOWN,
+                                    }
+                                }
+                                Command::XADD(key_bytes.clone(), entry_id_bytes.clone(), field_pairs)
+                            } else {
+                                Command::UNKNOWN
+                            }
                         }
                         "LRANGE" if arr.len() > 1 => {
                             if
@@ -293,6 +314,29 @@ impl Command {
                 db.insert(key.clone(), RedisValue::from_list(final_list.clone()));
                 format!(":{}\r\n", final_list.len())
             }
+            Command::XADD(key, entry_id, field_pairs) => {
+                let key = key.clone();
+                let entry_id = entry_id.clone();
+                let field_pairs = field_pairs.clone();
+                let new_entry = StreamEntry {
+                    id: entry_id.clone(),
+                    fields: field_pairs.clone(),
+                };
+                let mut db = database.lock().unwrap();
+                match db.get_mut(&key) {
+                    Some(existing_value) => {
+                        if let RedisValue::Stream(entries) = existing_value {
+                            entries.push(new_entry.clone());
+                        } else {
+                            return "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n".to_string();
+                        }
+                    }
+                    None => {
+                        db.insert(key.clone(), RedisValue::from_stream(vec![new_entry]));
+                    }
+                }
+                format!("${}\r\n{}\r\n", entry_id.len(), entry_id)
+            }
             Command::LRANGE(key, start, end) => {
                 let db = database.lock().unwrap();
                 if let Some(msg) = db.get(key) {
@@ -438,7 +482,6 @@ impl Command {
     }
 }
 
-
 pub fn lrange_slice_vec(list: &Vec<String>, start: isize, stop: isize) -> Vec<String> {
     let len = list.len() as isize;
     if len == 0 {
@@ -466,3 +509,4 @@ pub fn lrange_slice_vec(list: &Vec<String>, start: isize, stop: isize) -> Vec<St
     let en = (actual_stop + 1) as usize;
     list[st..en.min(list.len())].to_vec()
 }
+   
