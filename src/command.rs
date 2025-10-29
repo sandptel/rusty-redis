@@ -347,7 +347,7 @@ impl Command {
                                             entries.push(new_entry.clone());
                                         }
                                         false => {
-                                            return "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n\".to_string()".to_string();
+                                            return "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".to_string();
                                         }
                                     }
                                 }
