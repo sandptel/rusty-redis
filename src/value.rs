@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum RedisValue {
     String(String),
@@ -9,10 +8,56 @@ pub enum RedisValue {
     Stream(Vec<StreamEntry>),
 }
 
-#[derive(Clone,Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StreamEntry {
     pub id: String,
+    pub milliseconds_time: usize,
+    pub sequence_number: usize,
     pub fields: HashMap<String, String>,
+}
+
+impl StreamEntry {
+    // here I return Option<bool> : None denotes "(error) ERR The ID specified in XADD must be greater than 0-0"
+    // Option<true> denotes return entry_id
+    // Option<false> denotes (error) ERR The ID specified in XADD is equal or smaller than the target stream top item
+    pub fn validate_entry_id(new: StreamEntry, old: Option<&StreamEntry>) -> Option<bool> {
+        if new.milliseconds_time <= 0 {
+            if new.sequence_number>0
+            {
+                return Some(false)
+            }
+            return None;
+        }
+        
+        match old {
+            None => { Some(true) }
+            Some(old_entry) => {
+                if old_entry.milliseconds_time > new.milliseconds_time {
+                    dbg!("old milli > new milli");
+                    Some(false)
+                } else if old_entry.milliseconds_time == new.milliseconds_time {
+                    if old_entry.sequence_number >= new.sequence_number {
+                        dbg!("old seq: {} > new seq: {} after milli equal",old_entry.sequence_number,new.sequence_number);
+                        return Some(false);
+                    } else {
+                        return Some(true);
+                    }
+                } else {
+                    Some(true)
+                }
+            }
+        }
+    }
+    // this is very fragile as giving wrong entry_ids will break this unwrap() inside a the map(||)
+    pub fn from(id: String, fields: HashMap<String, String>) -> StreamEntry {
+        let entry_id: Vec<usize> = id
+            .split_terminator('-')
+            .map(|x| x.trim().parse().unwrap())
+            .collect();
+        let milliseconds_time = entry_id[0];
+        let sequence_number = entry_id[1];
+        StreamEntry { id, milliseconds_time, sequence_number, fields }
+    }
 }
 
 impl RedisValue {
