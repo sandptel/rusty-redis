@@ -329,21 +329,27 @@ impl Command {
                 let key = key.clone();
                 let entry_id = entry_id.clone();
                 let field_pairs = field_pairs.clone();
-                let new_entry = StreamEntry::from(entry_id.clone(), field_pairs.clone());
+
                 let mut db = database.lock().unwrap();
                 match db.get_mut(&key) {
                     Some(existing_value) => {
                         if let RedisValue::Stream(entries) = existing_value {
                             // entries.push(new_entry.clone());
                             let last_entry = entries.last();
+                            let new_entry = StreamEntry::from(
+                                entry_id.clone(),
+                                field_pairs.clone(),
+                                last_entry
+                            );
                             match StreamEntry::validate_entry_id(new_entry.clone(), last_entry) {
                                 None => {
-                                    return "-ERR The ID specified in XADD must be greater than 0-0\r\n".to_string()
+                                    return "-ERR The ID specified in XADD must be greater than 0-0\r\n".to_string();
                                 }
                                 Some(result) => {
                                     match result {
                                         true => {
                                             // return "".to_string()
+
                                             entries.push(new_entry.clone());
                                         }
                                         false => {
@@ -357,6 +363,11 @@ impl Command {
                         }
                     }
                     None => {
+                        let new_entry = StreamEntry::from(
+                            entry_id.clone(),
+                            field_pairs.clone(),
+                            None
+                        );
                         db.insert(key.clone(), RedisValue::from_stream(vec![new_entry]));
                     }
                 }

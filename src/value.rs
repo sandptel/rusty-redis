@@ -22,13 +22,12 @@ impl StreamEntry {
     // Option<false> denotes (error) ERR The ID specified in XADD is equal or smaller than the target stream top item
     pub fn validate_entry_id(new: StreamEntry, old: Option<&StreamEntry>) -> Option<bool> {
         if new.milliseconds_time <= 0 {
-            if new.sequence_number>0
-            {
-                return Some(false)
+            if new.sequence_number > 0 {
+                return Some(false);
             }
             return None;
         }
-        
+
         match old {
             None => { Some(true) }
             Some(old_entry) => {
@@ -37,7 +36,11 @@ impl StreamEntry {
                     Some(false)
                 } else if old_entry.milliseconds_time == new.milliseconds_time {
                     if old_entry.sequence_number >= new.sequence_number {
-                        dbg!("old seq: {} > new seq: {} after milli equal",old_entry.sequence_number,new.sequence_number);
+                        dbg!(
+                            "old seq: {} > new seq: {} after milli equal",
+                            old_entry.sequence_number,
+                            new.sequence_number
+                        );
                         return Some(false);
                     } else {
                         return Some(true);
@@ -49,13 +52,28 @@ impl StreamEntry {
         }
     }
     // this is very fragile as giving wrong entry_ids will break this unwrap() inside a the map(||)
-    pub fn from(id: String, fields: HashMap<String, String>) -> StreamEntry {
-        let entry_id: Vec<usize> = id
+    pub fn from(
+        id: String,
+        fields: HashMap<String, String>,
+        old: Option<&StreamEntry>
+    ) -> StreamEntry {
+        let mut entry_id: Vec<String> = id
             .split_terminator('-')
-            .map(|x| x.trim().parse().unwrap())
+            .map(|x| x.trim().to_string())
             .collect();
-        let milliseconds_time = entry_id[0];
-        let sequence_number = entry_id[1];
+        println!("{:?}",entry_id);
+        if entry_id[1] == "*" {
+            entry_id[1] = match old {
+                Some(stream_entry) => {
+                    let new_sequence_number = stream_entry.sequence_number + 1;
+                    new_sequence_number.to_string()
+                }
+                None => { (0).to_string() }
+            };
+        }
+        println!("{:?}",entry_id);
+        let milliseconds_time = entry_id[0].parse().expect("Incorrect milliseconds time entered");
+        let sequence_number = entry_id[1].parse().expect("Invalid Sequence Number Provided");
         StreamEntry { id, milliseconds_time, sequence_number, fields }
     }
 }
