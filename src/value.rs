@@ -8,7 +8,7 @@ pub enum RedisValue {
     Stream(Vec<StreamEntry>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq,Default)]
 pub struct StreamEntry {
     pub id: String,
     pub milliseconds_time: usize,
@@ -61,7 +61,7 @@ impl StreamEntry {
             .split_terminator('-')
             .map(|x| x.trim().to_string())
             .collect();
-        println!("{:?}",entry_id);
+        // println!("{:?}",entry_id);
         if entry_id[1] == "*" {
             entry_id[1] = match old {
                 Some(stream_entry) => {
@@ -71,9 +71,10 @@ impl StreamEntry {
                 None => { (0).to_string() }
             };
         }
-        println!("{:?}",entry_id);
+        // println!("{:?}",entry_id);
         let milliseconds_time = entry_id[0].parse().expect("Incorrect milliseconds time entered");
         let sequence_number = entry_id[1].parse().expect("Invalid Sequence Number Provided");
+        println!("milli: {}, sequence: {}",milliseconds_time,sequence_number);
         StreamEntry { id, milliseconds_time, sequence_number, fields }
     }
 }

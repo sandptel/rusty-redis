@@ -329,14 +329,19 @@ impl Command {
                 let key = key.clone();
                 let entry_id = entry_id.clone();
                 let field_pairs = field_pairs.clone();
-
+                // let mut new_entry = StreamEntry::default();
+                let mut new_entry = StreamEntry::from(
+                            entry_id.clone(),
+                            field_pairs.clone(),
+                            None
+                        );
                 let mut db = database.lock().unwrap();
                 match db.get_mut(&key) {
                     Some(existing_value) => {
                         if let RedisValue::Stream(entries) = existing_value {
                             // entries.push(new_entry.clone());
                             let last_entry = entries.last();
-                            let new_entry = StreamEntry::from(
+                            new_entry = StreamEntry::from(
                                 entry_id.clone(),
                                 field_pairs.clone(),
                                 last_entry
@@ -363,14 +368,10 @@ impl Command {
                         }
                     }
                     None => {
-                        let new_entry = StreamEntry::from(
-                            entry_id.clone(),
-                            field_pairs.clone(),
-                            None
-                        );
-                        db.insert(key.clone(), RedisValue::from_stream(vec![new_entry]));
+                        db.insert(key.clone(), RedisValue::from_stream(vec![new_entry.clone()]));
                     }
                 }
+                let entry_id = format!("{}-{}",new_entry.milliseconds_time,new_entry.sequence_number);
                 format!("${}\r\n{}\r\n", entry_id.len(), entry_id)
             }
             Command::LRANGE(key, start, end) => {
