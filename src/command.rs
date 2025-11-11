@@ -346,7 +346,7 @@ impl Command {
                                 field_pairs.clone(),
                                 last_entry
                             );
-                            match StreamEntry::validate_entry_id(new_entry.clone(), last_entry) {
+                            match StreamEntry::validate_entry_id(&mut new_entry, last_entry) {
                                 None => {
                                     return "-ERR The ID specified in XADD must be greater than 0-0\r\n".to_string();
                                 }

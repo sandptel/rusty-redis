@@ -20,14 +20,14 @@ impl StreamEntry {
     // here I return Option<bool> : None denotes "(error) ERR The ID specified in XADD must be greater than 0-0"
     // Option<true> denotes return entry_id
     // Option<false> denotes (error) ERR The ID specified in XADD is equal or smaller than the target stream top item
-    pub fn validate_entry_id(new: StreamEntry, old: Option<&StreamEntry>) -> Option<bool> {
-        if new.milliseconds_time <= 0 {
-            if new.sequence_number > 0 {
-                return Some(false);
+    pub fn validate_entry_id(new: &mut StreamEntry, old: Option<&StreamEntry>) -> Option<bool> {
+        if new.milliseconds_time == 0 {
+            if new.sequence_number == 0 {
+                new.sequence_number= 1;
+                return Some(true);
             }
             return None;
         }
-
         match old {
             None => { Some(true) }
             Some(old_entry) => {
