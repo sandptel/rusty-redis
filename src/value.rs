@@ -21,33 +21,29 @@ impl StreamEntry {
     // Option<true> denotes return entry_id
     // Option<false> denotes (error) ERR The ID specified in XADD is equal or smaller than the target stream top item
     pub fn validate_entry_id(new: &mut StreamEntry, old: Option<&StreamEntry>) -> Option<bool> {
-        if new.milliseconds_time == 0 {
-            if new.sequence_number == 0 {
-                new.sequence_number = 1;
-                return Some(true);
-            }
-            return None;
-        }
+        // First check if we have an old entry to compare against
         match old {
-            None => { Some(true) }
             Some(old_entry) => {
+                // Compare with existing entry
                 if old_entry.milliseconds_time > new.milliseconds_time {
-                    dbg!("old milli > new milli");
-                    Some(false)
+                    return Some(false);
                 } else if old_entry.milliseconds_time == new.milliseconds_time {
                     if old_entry.sequence_number >= new.sequence_number {
-                        dbg!(
-                            "old seq: {} > new seq: {} after milli equal",
-                            old_entry.sequence_number,
-                            new.sequence_number
-                        );
                         return Some(false);
                     } else {
                         return Some(true);
                     }
                 } else {
-                    Some(true)
+                    // old_entry.milliseconds_time < new.milliseconds_time
+                    return Some(true);
                 }
+            }
+            None => {
+                // No old entry, just validate against 0-0
+                if new.milliseconds_time == 0 && new.sequence_number == 0 {
+                    return None;
+                }
+                return Some(true);
             }
         }
     }
