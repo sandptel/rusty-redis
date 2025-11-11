@@ -8,7 +8,7 @@ pub enum RedisValue {
     Stream(Vec<StreamEntry>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq,Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct StreamEntry {
     pub id: String,
     pub milliseconds_time: usize,
@@ -23,7 +23,7 @@ impl StreamEntry {
     pub fn validate_entry_id(new: &mut StreamEntry, old: Option<&StreamEntry>) -> Option<bool> {
         if new.milliseconds_time == 0 {
             if new.sequence_number == 0 {
-                new.sequence_number= 1;
+                new.sequence_number = 1;
                 return Some(true);
             }
             return None;
@@ -61,20 +61,41 @@ impl StreamEntry {
             .split_terminator('-')
             .map(|x| x.trim().to_string())
             .collect();
-        // println!("{:?}",entry_id);
+
+        let milliseconds_time: usize = entry_id[0]
+            .parse()
+            .expect("Incorrect milliseconds time entered");
+
+        // Handle auto-generated sequence number
         if entry_id[1] == "*" {
             entry_id[1] = match old {
                 Some(stream_entry) => {
-                    let new_sequence_number = stream_entry.sequence_number + 1;
-                    new_sequence_number.to_string()
+                    // If the milliseconds time matches the last entry, increment sequence
+                    if stream_entry.milliseconds_time == milliseconds_time {
+                        (stream_entry.sequence_number + 1).to_string()
+                    } else {
+                        // Different milliseconds time, start from 0
+                        // Unless milliseconds_time is 0, then start from 1
+                        if milliseconds_time == 0 {
+                            "1".to_string()
+                        } else {
+                            "0".to_string()
+                        }
+                    }
                 }
-                None => { (0).to_string() }
+                None => {
+                    // No previous entries
+                    if milliseconds_time == 0 {
+                        "1".to_string()
+                    } else {
+                        "0".to_string()
+                    }
+                }
             };
         }
-        // println!("{:?}",entry_id);
-        let milliseconds_time = entry_id[0].parse().expect("Incorrect milliseconds time entered");
+
         let sequence_number = entry_id[1].parse().expect("Invalid Sequence Number Provided");
-        println!("milli: {}, sequence: {}",milliseconds_time,sequence_number);
+        println!("milli: {}, sequence: {}", milliseconds_time, sequence_number);
         StreamEntry { id, milliseconds_time, sequence_number, fields }
     }
 }

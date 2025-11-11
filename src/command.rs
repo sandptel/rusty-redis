@@ -330,11 +330,7 @@ impl Command {
                 let entry_id = entry_id.clone();
                 let field_pairs = field_pairs.clone();
                 // let mut new_entry = StreamEntry::default();
-                let mut new_entry = StreamEntry::from(
-                            entry_id.clone(),
-                            field_pairs.clone(),
-                            None
-                        );
+                let mut new_entry = StreamEntry::from(entry_id.clone(), field_pairs.clone(), None);
                 let mut db = database.lock().unwrap();
                 match db.get_mut(&key) {
                     Some(existing_value) => {
@@ -371,7 +367,11 @@ impl Command {
                         db.insert(key.clone(), RedisValue::from_stream(vec![new_entry.clone()]));
                     }
                 }
-                let entry_id = format!("{}-{}",new_entry.milliseconds_time,new_entry.sequence_number);
+                let entry_id = format!(
+                    "{}-{}",
+                    new_entry.milliseconds_time,
+                    new_entry.sequence_number
+                );
                 format!("${}\r\n{}\r\n", entry_id.len(), entry_id)
             }
             Command::LRANGE(key, start, end) => {
@@ -546,3 +546,4 @@ pub fn lrange_slice_vec(list: &Vec<String>, start: isize, stop: isize) -> Vec<St
     let en = (actual_stop + 1) as usize;
     list[st..en.min(list.len())].to_vec()
 }
+
