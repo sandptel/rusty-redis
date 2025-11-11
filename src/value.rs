@@ -91,7 +91,7 @@ impl StreamEntry {
         }
 
         let sequence_number = entry_id[1].parse().expect("Invalid Sequence Number Provided");
-        println!("milli: {}, sequence: {}", milliseconds_time, sequence_number);
+        // println!("milli: {}, sequence: {}", milliseconds_time, sequence_number);
         StreamEntry { id, milliseconds_time, sequence_number, fields }
     }
 }
